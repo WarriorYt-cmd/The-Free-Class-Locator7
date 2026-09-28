@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Campus - Free Room Locator & Attendance Advisor</title>
+  <!-- Tailwind CSS & FontAwesome -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+    body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0f172a; color: #f8fafc; }
+    
+    /* 3D Isometric Map Visuals */
+    .isometric-container { perspective: 1000px; transform-style: preserve-3d; }
+    .isometric-floor { transform: rotateX(55deg) rotateZ(-35deg); transition: all 0.5s ease; }
+    .isometric-floor:hover { transform: rotateX(48deg) rotateZ(-28deg) translateZ(10px); }
+    .room-3d-card { transition: all 0.3s ease; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5); }
+    .room-3d-card:hover { transform: translateZ(15px) scale(1.05); z-index: 20; }
+    .status-free { background-color: rgba(34, 197, 94, 0.2); border-color: #22c55e; }
+    .status-occupied { background-color: rgba(239, 68, 68, 0.2); border-color: #ef4444; }
+    
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- TOP NAVBAR -->
+  <header class="bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3">
+        <div class="bg-indigo-600 p-2.5 rounded-xl text-white shadow-lg shadow-indigo-500/30">
+          <i class="fa-solid me-1 fa-building-columns text-xl"></i>
+        </div>
+        <div>
+          <h1 class="font-extrabold text-xl tracking-tight text-white">CampusSmart</h1>
+          <p class="text-xs text-slate-400">Free Room Locator • Attendance Simulator</p>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="flex items-center space-x-2 bg-slate-800/80 p-1 rounded-xl border border-slate-700">
+        <button id="tab-locator-btn" onclick="switchTab('locator')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all bg-indigo-600 text-white shadow-md">
+          <i class="fa-solid fa-compass mr-1.5"></i> Room Locator & 3D Map
+        </button>
+        <button id="tab-attendance-btn" onclick="switchTab('attendance')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all text-slate-300 hover:text-white">
+          <i class="fa-solid fa-chart-pie mr-1.5"></i> Attendance & Leaves
+        </button>
+      </nav>
+
+      <!-- Dataset & Time Controls -->
+      <div class="flex items-center space-x-3">
+        <label class="cursor-pointer bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 transition text-slate-200">
+          <i class="fa-solid fa-file-arrow-up text-indigo-400"></i> Upload Dataset
+          <input type="file" id="dataset-upload" accept=".json" class="hidden" onchange="handleDatasetUpload(event)">
+        </label>
+        
+        <div class="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 flex items-center space-x-2 text-xs">
+          <i class="fa-solid fa-clock text-amber-400"></i>
+          <!-- DEBUG FIX 1: Native time input triggers real-time schedule update -->
+          <input type="time" id="time-simulator" value="11:30" class="bg-transparent text-amber-300 font-bold focus:outline-none cursor-pointer" onchange="updateSimTime(this.value)">
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN CONTAINER -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
+
+    <!-- ==================== SECTION 1: FREE ROOM LOCATOR ==================== -->
+    <div id="section-locator" class="space-y-6">
+      
+      <!-- AI Room Finder Bar -->
+      <div class="bg-gradient-to-r from-indigo-900/60 via-slate-900 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 shadow-2xl relative overflow-hidden">
+        <div class="relative z-10 space-y-3">
+          <div class="flex items-center space-x-2">
+            <span class="bg-indigo-500/20 text-indigo-300 text-xs font-bold px-2.5 py-1 rounded-full border border-indigo-500/30">
+              <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> AI Smart Search
+            </span>
+            <span class="text-xs text-slate-400">Type naturally (e.g., "AC room on ground floor")</span>
+          </div>
+          <form onsubmit="handleAISearch(event)" class="flex gap-2">
+            <input type="text" id="ai-search-input" placeholder="Find me an empty AC room on the ground floor..." 
+                   class="flex-1 bg-slate-950/80 border border-slate-700 focus:border-indigo-500 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none">
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-semibold text-sm transition-all shadow-lg flex items-center">
+              <i class="fa-solid fa-magnifying-glass mr-2"></i> Find
+            </button>
+          </form>
+          <div id="ai-search-result-banner" class="hidden text-xs bg-indigo-950/80 border border-indigo-800 text-indigo-200 p-2.5 rounded-lg flex items-center justify-between">
+            <span id="ai-search-msg"></span>
+            <button type="button" onclick="clearAISearch()" class="text-slate-400 hover:text-white font-bold ml-2">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="flex flex-wrap items-center justify-between gap-4 bg-slate-900/70 p-4 rounded-xl border border-slate-800">
+        <div class="flex items-center space-x-2">
+          <button onclick="filterFloor('ALL')" class="floor-filter-btn active-floor px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white" data-floor="ALL">All Floors</button>
+          <button onclick="filterFloor('Ground')" class="floor-filter-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-slate-400 border border-slate-800 hover:text-white" data-floor="Ground">Ground</button>
+          <button onclick="filterFloor('1st')" class="floor-filter-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-slate-400 border border-slate-800 hover:text-white" data-floor="1st">1st Floor</button>
+          <button onclick="filterFloor('2nd')" class="floor-filter-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-slate-400 border border-slate-800 hover:text-white" data-floor="2nd">2nd Floor</button>
+        </div>
+        <div class="flex items-center space-x-3">
+          <button onclick="toggleViewMode()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold px-3 py-1.5 rounded-lg text-slate-200">
+            <i class="fa-solid fa-cube mr-1 text-indigo-400"></i> Toggle 3D Map
+          </button>
+        </div>
+      </div>
+
+      <!-- 3D Perspective Map View -->
+      <div id="view-3d-container" class="hidden bg-slate-950/80 border border-slate-800 rounded-2xl p-6 relative overflow-hidden">
+        <div class="isometric-container py-12 flex justify-center items-center min-h-[380px]">
+          <div id="isometric-floor-plan" class="isometric-floor grid grid-cols-3 gap-6 w-full max-w-2xl p-6 bg-slate-900/90 rounded-3xl border-2 border-indigo-500/30 shadow-2xl">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Standard Floor Grid View -->
+      <div id="floor-grid-container" class="space-y-6">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- ==================== SECTION 2: ATTENDANCE DASHBOARD ==================== -->
+    <div id="section-attendance" class="hidden space-y-6">
+      
+      <!-- Top Stats -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex justify-between items-center">
+          <div><p class="text-xs text-slate-400">Overall Attendance</p><h3 id="overall-att-pct" class="text-3xl font-bold text-emerald-400">82.4%</h3></div>
+          <div class="p-3 bg-emerald-500/10 rounded-xl text-emerald-400 text-2xl"><i class="fa-solid fa-user-check"></i></div>
+        </div>
+      </div>
+
+      <!-- Chart & Simulator -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Chart -->
+        <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-5">
+          <h3 class="font-bold text-slate-200 text-base mb-4"><i class="fa-solid fa-chart-column text-indigo-400 mr-2"></i> Subject-Wise Breakdown</h3>
+          <div class="relative h-64 w-full"><canvas id="attendanceChart"></canvas></div>
+        </div>
+
+        <!-- Simulator -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+          <h3 class="font-bold text-slate-200 text-base border-b border-slate-800 pb-2 mb-4">OD & Leave Simulator</h3>
+          <form onsubmit="runODSimulation(event)" class="space-y-4">
+            <div>
+              <label class="text-xs text-slate-300 block mb-1">Select Subject</label>
+              <select id="sim-subject" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200">
+                <option value="ALL">All Subjects</option>
+                <option value="Chemistry">Chemistry</option>
+                <option value="Mathematics">Mathematics</option>
+                <option value="Physics">Physics</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div><label class="text-xs text-slate-300 block mb-1">OD Days</label><input type="number" id="sim-od-days" value="0" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200"></div>
+              <div><label class="text-xs text-slate-300 block mb-1">Leave Days</label><input type="number" id="sim-leave-days" value="0" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200"></div>
+            </div>
+            <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-xl text-sm font-semibold">Recalculate</button>
+          </form>
+          <div id="sim-result-box" class="mt-4 p-3 bg-slate-950 border border-slate-800 rounded-xl"><span id="sim-result-text" class="text-sm font-bold text-slate-400">Ready to simulate.</span></div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ROOM MODAL -->
+  <div id="room-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative space-y-5">
+      <button onclick="closeRoomModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+      <div class="flex items-center space-x-3 border-b border-slate-800 pb-4">
+        <div class="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl text-2xl border border-emerald-500/20"><i class="fa-solid fa-door-open"></i></div>
+        <div><h3 id="modal-room-id" class="text-xl font-extrabold text-slate-100">IST 509</h3><p id="modal-room-details" class="text-xs text-slate-400">Ground Floor</p></div>
+      </div>
+      <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 text-center space-y-1">
+        <span class="text-xs text-slate-400 uppercase font-semibold">Time Until Next Class</span>
+        <div id="modal-countdown-timer" class="text-3xl font-black text-amber-400 font-mono">Loading...</div>
+      </div>
+      <button onclick="shareToSquad()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold text-sm flex justify-center space-x-2">
+        <i class="fa-brands fa-whatsapp text-lg"></i><span>Call the Squad on WhatsApp</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- FLOATING CHATBOT -->
+  <div class="fixed bottom-5 right-5 z-50 flex flex-col items-end">
+    <div id="chat-window" class="hidden mb-3 w-80 md:w-96 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col h-[420px]">
+      <div class="bg-indigo-600 px-4 py-3 flex justify-between text-white"><span class="font-bold text-sm">Attendance Bot</span><button onclick="toggleChat()"><i class="fa-solid fa-xmark"></i></button></div>
+      <div id="chat-messages" class="flex-1 p-4 overflow-y-auto space-y-3 text-xs">
+        <div class="bg-slate-800 text-slate-200 p-3 rounded-xl max-w-[85%] border border-slate-700">Ask me math! Example:<br><i class="text-indigo-300">"If I take 3 days sick leave, will my Chemistry attendance drop below 75%?"</i></div>
+      </div>
+      <form onsubmit="handleChatSubmit(event)" class="p-2 bg-slate-950 border-t border-slate-800 flex gap-2">
+        <input type="text" id="chat-input" placeholder="Type here..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none">
+        <button type="submit" class="bg-indigo-600 text-white px-3 py-2 rounded-xl text-xs"><i class="fa-solid fa-paper-plane"></i></button>
+      </form>
+    </div>
+    <button onclick="toggleChat()" class="bg-indigo-600 text-white p-4 rounded-full shadow-2xl"><i class="fa-solid fa-robot text-2xl"></i></button>
+  </div>
+
+  <script>
+    // ==================== DATA ====================
+    let defaultRooms = [
+      { id: "IST 101", floor: "Ground", ac: true, capacity: 60, schedule: { "11:00": "Occupied", "12:00": "Free", "13:00": "Free", "14:00": "Occupied" }, nextClass: "Chemistry" },
+      { id: "IST 102", floor: "Ground", ac: false, capacity: 40, schedule: { "11:00": "Free", "12:00": "Occupied", "13:00": "Free", "14:00": "Free" }, nextClass: "Physics" },
+      { id: "IST 201", floor: "1st", ac: true, capacity: 50, schedule: { "11:00": "Occupied", "12:00": "Free", "13:00": "Occupied", "14:00": "Free" }, nextClass: "Data Structures" },
+      { id: "IST 301", floor: "2nd", ac: true, capacity: 80, schedule: { "11:00": "Free", "12:00": "Free", "13:00": "Occupied", "14:00": "Occupied" }, nextClass: "AI Ethics" }
+    ];
+
+    let userAttendance = [
+      { subject: "Chemistry", attended: 22, total: 29 },
+      { subject: "Mathematics", attended: 26, total: 30 },
+      { subject: "Physics", attended: 24, total: 28 }
+    ];
+
+    let currentSimTime = "11:30"; // From input
+    let timerInterval = null;
+    let activeSelectedRoom = null;
+    let attendanceChartInstance = null;
+
+    // ==================== LOGIC ====================
+    function updateSimTime(val) {
+      currentSimTime = val; 
+      renderRoomLocator(); // DEBUG FIX 3: Instantly recalculates Free/Occupied based on exact hour.
+    }
+
+    function switchTab(tab) {
+      document.getElementById('section-locator').classList.toggle('hidden', tab !== 'locator');
+      document.getElementById('section-attendance').classList.toggle('hidden', tab !== 'attendance');
+      
+      const locBtn = document.getElementById('tab-locator-btn');
+      const attBtn = document.getElementById('tab-attendance-btn');
+      
+      if(tab === 'locator') {
+        locBtn.className = "px-4 py-2 rounded-lg text-sm font-semibold transition-all bg-indigo-600 text-white shadow-md";
+        attBtn.className = "px-4 py-2 rounded-lg text-sm font-semibold transition-all text-slate-300 hover:text-white";
+      } else {
+        attBtn.className = "px-4 py-2 rounded-lg text-sm font-semibold transition-all bg-indigo-600 text-white shadow-md";
+        locBtn.className = "px-4 py-2 rounded-lg text-sm font-semibold transition-all text-slate-300 hover:text-white";
+        renderAttendanceChart();
+      }
+    }
+
+    function renderRoomLocator(filterFloorName = 'ALL', searchMatches = null) {
+      const grid = document.getElementById('floor-grid-container');
+      const iso = document.getElementById('isometric-floor-plan');
+      grid.innerHTML = ''; iso.innerHTML = '';
+
+      // Determine hour slot (e.g. "11:30" -> "11:00")
+      let hourSlot = currentSimTime.split(':')[0] + ":00";
+
+      ['Ground', '1st', '2nd'].forEach(floor => {
+        if (filterFloorName !== 'ALL' && filterFloorName !== floor) return;
+        
+        let rooms = defaultRooms.filter(r => r.floor === floor);
+        if(!rooms.length) return;
+
+        let html = `<div class="mb-2 border-b border-slate-800 pb-2"><h3 class="text-sm font-extrabold text-indigo-400 uppercase">${floor} Floor</h3></div><div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">`;
+        
+        rooms.forEach(room => {
+          let isFree = room.schedule[hourSlot] === "Free" || room.schedule[hourSlot] === undefined;
+          let matched = !searchMatches || searchMatches.includes(room.id);
+          let matchClass = matched ? '' : 'opacity-40 grayscale';
+
+          html += `
+            <div onclick="openRoomModal('${room.id}')" class="cursor-pointer bg-slate-900 border ${isFree ? 'border-emerald-500/40 bg-emerald-950/10' : 'border-red-500/40 bg-red-950/10'} hover:border-indigo-500 rounded-xl p-4 shadow-md ${matchClass}">
+              <div class="flex justify-between mb-2">
+                <span class="font-extrabold text-slate-100">${room.id}</span>
+                <span class="px-2 py-0.5 rounded-full text-xs font-bold ${isFree ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}">${isFree ? '🟢 FREE' : '🔴 BUSY'}</span>
+              </div>
+              <div class="text-xs text-slate-400"><p>${room.ac ? 'AC' : 'Non-AC'} • Cap: ${room.capacity}</p></div>
+            </div>`;
+          
+          let isoBlock = document.createElement('div');
+          isoBlock.onclick = () => openRoomModal(room.id);
+          isoBlock.className = `room-3d-card p-3 rounded-xl border-2 text-center cursor-pointer ${isFree ? 'status-free text-emerald-300' : 'status-occupied text-red-300'}`;
+          isoBlock.innerHTML = `<div class="font-bold text-xs">${room.id}</div><div class="text-[10px] mt-1">${isFree ? 'FREE' : 'BUSY'}</div>`;
+          iso.appendChild(isoBlock);
+        });
+        grid.innerHTML += html + `</div>`;
+      });
+    }
+
+    function filterFloor(floor) {
+      document.querySelectorAll('.floor-filter-btn').forEach(btn => {
+        btn.className = (btn.dataset.floor === floor) 
+          ? "floor-filter-btn active-floor px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white" 
+          : "floor-filter-btn px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-slate-400 border border-slate-800 hover:text-white";
+      });
+      renderRoomLocator(floor);
+    }
+
+    function toggleViewMode() { document.getElementById('view-3d-container').classList.toggle('hidden'); }
+
+    function handleAISearch(e) {
+      e.preventDefault();
+      const txt = document.getElementById('ai-search-input').value.toLowerCase();
+      const matched = defaultRooms.filter(r => {
+        if(txt.includes('ac') && !txt.includes('non') && !r.ac) return false;
+        if(txt.includes('ground') && r.floor !== 'Ground') return false;
+        if(txt.includes('1st') && r.floor !== '1st') return false;
+        return true;
+      }).map(r => r.id);
+      
+      document.getElementById('ai-search-result-banner').classList.remove('hidden');
+      document.getElementById('ai-search-msg').innerHTML = `Found <strong>${matched.length}</strong> rooms.`;
+      renderRoomLocator('ALL', matched);
+    }
+    
+    function clearAISearch() {
+      document.getElementById('ai-search-input').value = '';
+      document.getElementById('ai-search-result-banner').classList.add('hidden');
+      renderRoomLocator();
+    }
+
+    // MODAL
+    function openRoomModal(id) {
+      activeSelectedRoom = defaultRooms.find(r => r.id === id);
+      document.getElementById('modal-room-id').innerText = id;
+      document.getElementById('modal-room-details').innerText = `${activeSelectedRoom.floor} Floor • ${activeSelectedRoom.ac ? 'AC' : 'Non-AC'}`;
+      document.getElementById('room-modal').classList.remove('hidden');
+      
+      if(timerInterval) clearInterval(timerInterval);
+      let sec = 3600;
+      timerInterval = setInterval(() => {
+        sec--;
+        document.getElementById('modal-countdown-timer').innerText = `${Math.floor(sec/3600).toString().padStart(2,'0')}h ${Math.floor((sec%3600)/60).toString().padStart(2,'0')}m ${(sec%60).toString().padStart(2,'0')}s`;
+        if(sec<=0) clearInterval(timerInterval);
+      }, 1000);
+    }
+    function closeRoomModal() { document.getElementById('room-modal').classList.add('hidden'); clearInterval(timerInterval); }
+    function shareToSquad() {
+      if(!activeSelectedRoom) return;
+      window.open(`https://wa.me/?text=${encodeURIComponent(`📍 Heading to ${activeSelectedRoom.id}. It's free. Come fast!`)}`, '_blank');
+    }
+
+    // ATTENDANCE & BOT
+    function renderAttendanceChart() {
+      const ctx = document.getElementById('attendanceChart').getContext('2d');
+      if(attendanceChartInstance) attendanceChartInstance.destroy();
+      const pct = userAttendance.map(a => Math.round((a.attended/a.total)*100));
+      attendanceChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: userAttendance.map(a=>a.subject), datasets: [{ data: pct, backgroundColor: pct.map(p=>p>=75?'#22c55e':'#ef4444'), borderRadius: 6 }] },
+        options: { responsive: true, maintainAspectRatio: false, scales: { y: { min: 0, max: 100 } }, plugins: { legend: { display: false } } }
+      });
+      
+      // Update overall stat
+      let tAtt = userAttendance.reduce((s,a)=>s+a.attended,0);
+      let tTot = userAttendance.reduce((s,a)=>s+a.total,0);
+      document.getElementById('overall-att-pct').innerText = ((tAtt/tTot)*100).toFixed(1) + "%";
+    }
+
+    function runODSimulation(e) {
+      e.preventDefault();
+      const subj = document.getElementById('sim-subject').value;
+      const od = parseInt(document.getElementById('sim-od-days').value)||0;
+      const lv = parseInt(document.getElementById('sim-leave-days').value)||0;
+      let tA=0, tC=0;
+      userAttendance.forEach(a => {
+        if(subj==='ALL' || a.subject===subj) { tA+=(a.attended+od); tC+=(a.total+od+lv); } 
+        else { tA+=a.attended; tC+=a.total; }
+      });
+      const pct = ((tA/tC)*100).toFixed(1);
+      const res = document.getElementById('sim-result-text');
+      res.innerText = pct >= 75 ? `✅ Safe: ${pct}%` : `⚠️ Drop: ${pct}% (Below 75%)`;
+      res.className = pct >= 75 ? "text-sm font-bold text-emerald-400" : "text-sm font-bold text-red-400";
+    }
+
+    // DEBUG FIX 2: Chatbot now dynamically parses user text and calculates math against array.
+    function toggleChat() { document.getElementById('chat-window').classList.toggle('hidden'); }
+    function handleChatSubmit(e) {
+      e.preventDefault();
+      const inp = document.getElementById('chat-input');
+      const q = inp.value.trim().toLowerCase();
+      if(!q) return;
+
+      const box = document.getElementById('chat-messages');
+      box.innerHTML += `<div class="bg-indigo-600 text-white p-3 rounded-xl max-w-[85%] ml-auto text-xs">${inp.value}</div>`;
+      inp.value = ''; box.scrollTop = box.scrollHeight;
+
+      setTimeout(() => {
+        let reply = "";
+        let matchedSubj = userAttendance.find(a => q.includes(a.subject.toLowerCase()));
+        let daysMatch = q.match(/(\d+)\s*-?\s*day/);
+        let days = daysMatch ? parseInt(daysMatch[1]) : 0;
+
+        if (q.includes('leave') || q.includes('sick')) {
+          if(matchedSubj && days > 0) {
+            let newPct = ((matchedSubj.attended / (matchedSubj.total + days)) * 100).toFixed(1);
+            reply = `If you take a ${days}-day leave, your ${matchedSubj.subject} attendance drops to ${newPct}%. ${newPct < 75 ? '⚠️ Warning: Below 75%!' : '✅ Still above 75%.'}`;
+          } else {
+            reply = "I see you're asking about leave. Please mention the specific subject and number of days (e.g., '3 days sick leave for Chemistry').";
+          }
+        } else {
+          let tA = userAttendance.reduce((s,a)=>s+a.attended,0), tT = userAttendance.reduce((s,a)=>s+a.total,0);
+          reply = `Your overall attendance is currently ${((tA/tT)*100).toFixed(1)}%.`;
+        }
+        
+        box.innerHTML += `<div class="bg-slate-800 text-slate-200 p-3 rounded-xl max-w-[85%] border border-slate-700 text-xs">${reply}</div>`;
+        box.scrollTop = box.scrollHeight;
+      }, 600);
+    }
+
+    function handleDatasetUpload(e) {
+      const file = e.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try { defaultRooms = JSON.parse(ev.target.result); renderRoomLocator(); alert("Dataset Loaded!"); } 
+        catch(err) { alert("Invalid JSON format."); }
+      };
+      reader.readAsText(file);
+    }
+
+    window.onload = renderRoomLocator;
+  </script>
+</body>
+</html>
